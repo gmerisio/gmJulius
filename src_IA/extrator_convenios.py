@@ -398,10 +398,10 @@ def main():
     ]
     
     # Organização das pastas conforme sua estrutura
-    PASTA_DOWNLOADS = "documentos_convenios_sgp"  # Pasta base para documentos
-    PASTA_BDS = "bds"  # Pasta para banco de dados
-    NOME_BANCO = "portaltp.db"  # Nome do banco de dados
-    NOME_TABELA_DB = "convenios_sgp"
+    PASTA_DOWNLOADS = "documentos_convenios" 
+    PASTA_BDS = "bds"  
+    NOME_BANCO = "convenios.db"  
+    NOME_TABELA_DB = "convenios"
     
     # Caminhos completos
     CAMINHO_BANCO_COMPLETO = os.path.join(PASTA_BDS, NOME_BANCO)
