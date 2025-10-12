@@ -2,3 +2,5 @@
 __pycache__/
 output/
 *.pdf
+src_IA/tabelas.json
+src_IA/convenios.json
