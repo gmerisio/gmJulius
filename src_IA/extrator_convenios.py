@@ -14,11 +14,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 
 def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloads, banco_de_dados, id_pagina):
-    """
-    Versão corrigida para processar TODAS as linhas, incluindo primeira e última
-    """
+
     print(f"📄 Iniciando processo com Selenium para a página: {url_pagina}")
     
     # Criar pasta específica para o ID
@@ -28,7 +27,15 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
     metadata_list = []
 
     service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service)
+    chrome_options = Options()
+    chrome_options.page_load_strategy = "normal" # Alterado para normal para garantir carregamento
+    chrome_options.add_argument("--disable-notifications")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     
     try:
         # --- LÓGICA DE INTERAÇÃO ---
@@ -50,51 +57,46 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
         
         print("  -> Etapa 3: Rolando a página para centralizar o botão...")
         driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", botao_paginador)
-        time.sleep(1)
+        time.sleep(2)
 
         print("  -> Etapa 4: Clicando para expandir o menu (via JavaScript)...")
         driver.execute_script("arguments[0].click();", botao_paginador)
-        
-        print("     - Menu expandido! Pausando por 3 segundos para verificação visual...")
-        time.sleep(3)
+        time.sleep(2)
 
         print("  -> Etapa 5: Procurando e clicando na opção 'Todos'...")
         opcao_todos = wait.until(EC.presence_of_element_located((By.XPATH, "//*[text()='Todos']")))
         driver.execute_script("arguments[0].click();", opcao_todos)
         
-        print("  -> Etapa 6: Aguardando a tabela carregar todos os dados...")
+        print("  -> Etapa 6: Aguardando a tabela atualizar...")
         
-        # Estratégia mais robusta para aguardar a tabela
-        time.sleep(8)
+        time.sleep(10) # Aumentado levemente para garantir o render completo
         
-        # Verificar se a tabela existe
-        linhas = driver.find_elements(By.CSS_SELECTOR, "tr")
-        linhas_dados = [linha for linha in linhas if len(linha.find_elements(By.TAG_NAME, "td")) >= 5]
-        
-        if not linhas_dados:
-            print("  -> AVISO: Não foi possível detectar a tabela após expansão.")
+        # Validação simples: verificar se a tabela principal está no DOM, sem iterar linhas
+        id_tabela = "ctl00_containerCorpo_grdData_DXMainTable"
+        try:
+            wait.until(EC.presence_of_element_located((By.ID, id_tabela)))
+            print("     - Elemento da tabela detectado no DOM.")
+        except TimeoutException:
+            print("  -> AVISO: Elemento da tabela principal não encontrado.")
             return [], 0, 0, 0
-        
-        print(f"     - Tabela carregada com {len(linhas_dados)} linhas!")
 
-        # --- LÓGICA DE EXTRAÇÃO DOS DADOS ---
-        print("  -> Etapa 7: Extraindo dados da tabela expandida...")
+        # --- LÓGICA DE EXTRAÇÃO DOS DADOS  ---
+        print("  -> Etapa 7: Extraindo HTML e processando com BeautifulSoup...")
         
-        # Obter o HTML atualizado
+        # Pega o HTML snapshot agora. Se algo for "stale" depois disso, não importa.
         html_completo = driver.page_source
-        
         soup_completo = BeautifulSoup(html_completo, 'lxml')
         
         # Encontrar a tabela principal
-        tabela = soup_completo.find('table', {'id': 'ctl00_containerCorpo_grdData_DXMainTable'})
+        tabela = soup_completo.find('table', {'id': id_tabela})
         if not tabela:
-            print("🔴 ERRO: Tabela principal não foi encontrada no HTML.")
+            print("🔴 ERRO: Tabela principal não foi encontrada no HTML extraído.")
             return [], 0, 0, 0
         
-        # Encontrar TODAS as linhas de dados - incluindo a primeira e última
+        # Encontrar TODAS as linhas de dados pela classe do DevExpress
         linhas = tabela.find_all('tr', class_='dxgvDataRow')
         
-        # Se não encontrar pelas classes específicas, pegar todas as linhas que têm dados
+        # Fallback: Se não encontrar pelas classes específicas, pegar genérico
         if not linhas:
             linhas = [tr for tr in tabela.find_all('tr') if len(tr.find_all('td')) >= 5]
         
@@ -112,31 +114,25 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
                     documentos_existentes.add(arquivo)
         print(f"  -> {len(documentos_existentes)} documentos já existem na pasta id_{id_pagina}")
 
-        # Processar cada linha da tabela - começando do índice 1
+        # Processar cada linha da tabela
         session = requests.Session()
+        # Adicionar headers para parecer um browser real no requests
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
+
         documentos_baixados = 0
         documentos_pulados = 0
         documentos_com_erro = 0
         
-        for i, linha in enumerate(linhas, 1):  # Começa do 1 para numeração amigável
+        for i, linha in enumerate(linhas, 1):
             celulas = linha.find_all('td')
             
-            # Verificar se tem células suficientes para ser uma linha de dados real
             if len(celulas) < 6: 
-                print(f"    ({i}/{len(linhas)}) ⚠️  Linha com poucas células ({len(celulas)}), pulando...")
-                documentos_com_erro += 1
                 continue
             
             try:
-                # DEBUG: Verificar estrutura da primeira linha
-                if i == 1:
-                    print(f"\n    🔍 DEBUG Primeira linha - {len(celulas)} células:")
-                    for idx, celula in enumerate(celulas):
-                        texto = celula.get_text(strip=True)
-                        link = celula.find('a', href=True)
-                        print(f"      Célula {idx}: '{texto[:50]}' | Link: {link['href'] if link else 'Nenhum'}")
-                
-                # Extrair dados - ajustar índices conforme necessário
+                # Extrair dados
                 numero_arquivo = celulas[0].get_text(strip=True)
                 periodicidade = celulas[1].get_text(strip=True)
                 publicado_em = celulas[2].get_text(strip=True)
@@ -144,21 +140,20 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
                 mes = celulas[4].get_text(strip=True)
                 descricao = celulas[5].get_text(strip=True)
                 
-                # Procurar link de download em diferentes colunas
+                # Procurar link de download
                 link_tag = None
-                for col_idx in [5, 6]:  # Tentar coluna 6 e 7 (índices 5 e 6)
+                for col_idx in [5, 6]:
                     if len(celulas) > col_idx:
                         link_tag = celulas[col_idx].find('a', href=True)
                         if link_tag:
                             break
                 
-                # Inicializar variáveis
                 url_documento = ""
                 caminho_arquivo = ""
                 tamanho = ""
                 
-                # Extrair tamanho do arquivo (últimas colunas)
-                for col_idx in [6, 7]:  # Tentar coluna 7 e 8 (índices 6 e 7)
+                # Tentar pegar tamanho
+                for col_idx in [6, 7]:
                     if len(celulas) > col_idx:
                         tamanho_temp = celulas[col_idx].get_text(strip=True)
                         if tamanho_temp and 'MB' in tamanho_temp.upper():
@@ -168,63 +163,43 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
                 if link_tag and link_tag.get('href'):
                     url_documento = urljoin(base_url, link_tag['href'])
                     
-                    # Pular links JavaScript
                     if url_documento.startswith('javascript:'):
-                        print(f"    ({i}/{len(linhas)}) ⚠️  Link JavaScript, pulando: {descricao[:60]}...")
-                        documentos_com_erro += 1
-                        # Mesmo assim adicionar aos metadados
+                        # Logica para Javascript links (ignorar por enquanto ou implementar postback)
                         metadata_list.append({
-                            'id_linha': i,
-                            'numero_arquivo': numero_arquivo,
-                            'descricao': descricao,
-                            'periodicidade': periodicidade,
-                            'publicado_em': publicado_em,
-                            'ano': ano,
-                            'mes': mes,
-                            'tamanho_arquivo': tamanho,
-                            'arquivo_salvo_em': "LINK_JAVASCRIPT",
-                            'url_documento': url_documento,
-                            'data_extracao': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'id_linha': i, 'numero_arquivo': numero_arquivo, 'descricao': descricao,
+                            'periodicidade': periodicidade, 'publicado_em': publicado_em, 'ano': ano, 'mes': mes,
+                            'tamanho_arquivo': tamanho, 'arquivo_salvo_em': "LINK_JAVASCRIPT",
+                            'url_documento': url_documento, 'data_extracao': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
                             'id_pagina': id_pagina
                         })
                         continue
                     
-                    # Criar nome de arquivo seguro
                     nome_arquivo_seguro = f"{i:03d}_{ano}_{descricao[:40].replace('/', '_').replace(':', '').replace(' ', '_')}.pdf"
                     nome_arquivo_seguro = "".join(c for c in nome_arquivo_seguro if c.isalnum() or c in '._-')
                     caminho_arquivo = os.path.join(pasta_id, nome_arquivo_seguro)
                     
-                    # Verificar se o arquivo já existe
                     if nome_arquivo_seguro in documentos_existentes:
-                        print(f"    ({i}/{len(linhas)}) ⏭️  Já existe, pulando: {descricao[:60]}...")
+                        print(f"    ({i}/{len(linhas)}) ⏭️  Já existe: {descricao[:40]}...")
                         documentos_pulados += 1
                     else:
-                        # Fazer download
                         try:
-                            print(f"    ({i}/{len(linhas)}) 📥 Baixando: {descricao[:60]}...")
+                            print(f"    ({i}/{len(linhas)}) 📥 Baixando: {descricao[:40]}...")
+                            doc_response = session.get(url_documento, timeout=30)
                             
-                            doc_response = session.get(url_documento, timeout=60)
-                            doc_response.raise_for_status()
-                            
-                            # Verificar se é realmente um PDF
-                            content_type = doc_response.headers.get('content-type', '')
-                            if 'pdf' in content_type.lower() or len(doc_response.content) > 1000:
+                            if doc_response.status_code == 200 and len(doc_response.content) > 0:
                                 with open(caminho_arquivo, 'wb') as f:
                                     f.write(doc_response.content)
-                                
                                 documentos_baixados += 1
-                                print(f"      ✅ Baixado: {nome_arquivo_seguro} ({len(doc_response.content)} bytes)")
                             else:
-                                print(f"      ⚠️  Não é PDF válido, content-type: {content_type}")
-                                caminho_arquivo = f"ERRO: Não é PDF válido"
+                                print(f"      ⚠️ Falha download. Status: {doc_response.status_code}")
+                                caminho_arquivo = f"ERRO: Status {doc_response.status_code}"
                                 documentos_com_erro += 1
                             
-                        except requests.RequestException as e:
-                            print(f"      🔴 Erro no download: {e}")
+                        except Exception as e:
+                            print(f"      🔴 Erro download: {e}")
                             caminho_arquivo = f"ERRO: {e}"
                             documentos_com_erro += 1
                 
-                # Adicionar metadados (mesmo se não tiver link)
                 metadata_list.append({
                     'id_linha': i,
                     'numero_arquivo': numero_arquivo,
@@ -241,35 +216,18 @@ def extrair_e_baixar_documentos_com_selenium(url_pagina, base_url, pasta_downloa
                 })
 
             except Exception as e:
-                print(f"      🔴 Erro ao processar linha {i}: {e}")
+                print(f"      🔴 Erro na linha {i}: {e}")
                 documentos_com_erro += 1
-                # Adicionar linha com erro aos metadados
-                metadata_list.append({
-                    'id_linha': i,
-                    'numero_arquivo': "",
-                    'descricao': f"ERRO: {e}",
-                    'periodicidade': "",
-                    'publicado_em': "",
-                    'ano': "",
-                    'mes': "",
-                    'tamanho_arquivo': "",
-                    'arquivo_salvo_em': f"ERRO: {e}",
-                    'url_documento': "",
-                    'data_extracao': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'id_pagina': id_pagina
-                })
                 continue
 
-        print(f"✅ Extração finalizada! {documentos_baixados} novos documentos baixados, {documentos_pulados} pulados (já existiam), {documentos_com_erro} com erro.")
+        print(f"✅ Extração finalizada! Baixados: {documentos_baixados}, Pulados: {documentos_pulados}, Erros: {documentos_com_erro}")
         return metadata_list, documentos_baixados, documentos_pulados, documentos_com_erro
 
     except Exception as e:
-        print(f"🔴 Um erro crítico ocorreu: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"🔴 Erro crítico: {e}")
         return [], 0, 0, 0
     finally:
-        print("  -> Fechando o navegador.")
+        print("  -> Fechando navegador.")
         if 'driver' in locals():
             driver.quit()
 
@@ -389,15 +347,16 @@ def main():
     BASE_URL = "https://saogabrieldapalha-es.portaltp.com.br/"
     
     # Lista completa de IDs para processar
-    LISTA_IDS = [
-        136, 143, 156, 132, 222, 8, 9, 41, 1012, 77, 55, 219, 34, 371, 631, 
-        153, 76, 311, 33, 106, 248, 481, 104, 458, 881, 1, 2, 3, 4, 5, 7, 
-        6, 60, 590, 64, 1390, 1342, 39, 555, 1255, 99, 57, 56, 63, 58, 59, 
-        36, 61, 1074, 1241, 230, 2019, 557, 558, 514, 515, 914, 547, 1346, 
-        39, 656, 747, 2172, 272, 277, 454, 605, 606, 611, 868, 874, 1307, 2167
-    ]
+    LISTA_IDS = [8]
+    # LISTA_IDS = [
+       # 136, 143, 156, 132, 222, 8, 9, 41, 1012, 77, 55, 219, 34, 371, 631, 
+       # 153, 76, 311, 33, 106, 248, 481, 104, 458, 881, 1, 2, 3, 4, 5, 7, 
+       # 6, 60, 590, 64, 1390, 1342, 39, 555, 1255, 99, 57, 56, 63, 58, 59, 
+       # 36, 61, 1074, 1241, 230, 2019, 557, 558, 514, 515, 914, 547, 1346, 
+       # 39, 656, 747, 2172, 272, 277, 454, 605, 606, 611, 868, 874, 1307, 2167
+    #]
     
-    # Organização das pastas conforme sua estrutura
+    # Organização das pastas conforme estrutura
     PASTA_DOWNLOADS = "documentos_convenios" 
     PASTA_BDS = "bds"  
     NOME_BANCO = "convenios.db"  
