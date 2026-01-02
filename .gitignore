@@ -7,3 +7,4 @@ output/
 *.duckdb
 *.parquet
 *.csv
+*.ipynb
