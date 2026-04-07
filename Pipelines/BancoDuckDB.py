@@ -1,13 +1,26 @@
 import duckdb
 
-parquet_file = r"C:\Users\gmeri\OneDrive\Área de Trabalho\Pasta Pessoal\Trabalho\gmJulius\dados.parquet"
-duckdb_file = r"C:\Users\gmeri\OneDrive\Área de Trabalho\Pasta Pessoal\Trabalho\gmJulius\Julius.duckdb"
+# Ajuste os caminhos conforme necessário
+sqlite_file = r"C:\Users\gmeri\OneDrive\Área de Trabalho\Pasta Pessoal\Trabalho\gmJulius\bds\ContratosSGDP.db"
+duckdb_file = r"C:\Users\gmeri\OneDrive\Área de Trabalho\Pasta Pessoal\Trabalho\gmJulius\bds\convenios.duckdb"
+
+# Nome da tabela dentro do SQLite
+tabela_origem = "contratos"
 
 con = duckdb.connect(duckdb_file)
+
+# 1. Instala/Carrega a extensão SQLite
+# 2. Conecta o arquivo SQLite ao DuckDB (Attach)
+# 3. Cria a tabela 'dados' copiando da origem
 con.execute(f"""
-    CREATE OR REPLACE TABLE dados AS
-    SELECT * FROM read_parquet('{parquet_file}');
+    INSTALL sqlite;
+    LOAD sqlite;
+    ATTACH '{sqlite_file}' AS db_origem (TYPE SQLITE);
+    
+    CREATE OR REPLACE TABLE dados AS 
+    SELECT * FROM db_origem.{tabela_origem};
 """)
+
 con.close()
 
-print("OK — Banco criado:", duckdb_file)
+print("OK — Dados migrados do SQLite para:", duckdb_file)

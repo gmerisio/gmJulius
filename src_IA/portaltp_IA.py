@@ -7,6 +7,14 @@ from datetime import datetime
 from urllib.parse import urlparse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import json
+import re
+
+# --- CONFIGURAÇÃO ---
+ENDPOINTS_ANUAIS = ['contratos', 'dispensas_emergenciais', 'receitas_emergenciais', 'atas', 'bens_consolidado', 'bens_moveis', 'bens_imoveis', 'frota_veiculos', 'divida_ativa', 'orcamento_receitas', 'orcamento_despesas', 'ordem_cronologica_a_pagar', 'programa_acao']
+
+def is_endpoint_anual(endpoint_name):
+    return any(key in endpoint_name.lower() for key in ENDPOINTS_ANUAIS)
 
 def normalizar_url(url):
     url = url.strip()
@@ -16,10 +24,42 @@ def normalizar_url(url):
 
 def get_retry_session():
     session = requests.Session()
-    retries = Retry(total=3, backoff_factor=2, status_forcelist=[500, 502, 503, 504])
+    retries = Retry(total=3, backoff_factor=3, status_forcelist=[500, 502, 503, 504])
     session.mount('http://', HTTPAdapter(max_retries=retries))
     session.mount('https://', HTTPAdapter(max_retries=retries))
+    
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
     return session
+
+def extrair_json_de_xml(content_text):
+    try:
+        # Tenta remover tags XML <string...> e </string>
+        if "<string" in content_text:
+            # Regex para pegar tudo dentro da tag string, ignorando atributos xmlns
+            match = re.search(r'<string[^>]*>(.*)</string>', content_text, re.DOTALL)
+            if match:
+                return json.loads(match.group(1))
+        
+        # Tenta limpar qualquer coisa antes do primeiro '[' ou '{'
+        idx_brace = content_text.find('{')
+        idx_bracket = content_text.find('[')
+        
+        start_idx = -1
+        if idx_brace != -1 and idx_bracket != -1:
+            start_idx = min(idx_brace, idx_bracket)
+        elif idx_brace != -1:
+            start_idx = idx_brace
+        elif idx_bracket != -1:
+            start_idx = idx_bracket
+            
+        if start_idx != -1:
+            return json.loads(content_text[start_idx:])
+            
+    except Exception:
+        pass
+    return None
 
 def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,9 +67,9 @@ def main():
     bds_dir = os.path.join(base_dir, 'bds')
     logs_dir = os.path.join(base_dir, 'logs')
 
-    endpoints_file = os.path.join(data_dir, 'endpoints_portaltp.txt')
+    endpoints_file = os.path.join(data_dir, 'endpoints_exclusivo.txt')
     prefeituras_file = os.path.join(data_dir, 'prefeiturasExclusivo.csv')
-    db_file = os.path.join(bds_dir, 'portaltp_IA.db')
+    db_file = os.path.join(bds_dir, 'ContratosSGDP.db')
     error_log_file = os.path.join(logs_dir, 'portaltp_errors.log')
     execution_log_file = os.path.join(logs_dir, 'portaltp_execution.log')
     last_run_file = os.path.join(logs_dir, 'portaltp_last_run.txt')
@@ -124,8 +164,11 @@ def run_extraction(data_inicio, data_fim, endpoints_file, prefeituras_file, db_f
     cursor = conn.cursor()
 
     for endpoint in endpoints:
-        endpoint_name = endpoint.split('/')[-1].replace('Get', '').lower()
-        print(f"\n{'='*50}\n🔧 Processando endpoint: {endpoint_name}")
+        endpoint_name = endpoint.split('/')[-1].replace('Get', '').replace('json_', '').lower()
+        eh_anual = is_endpoint_anual(endpoint_name)
+        tipo_str = "ANUAL (mes=0)" if eh_anual else "MENSAL"
+        
+        print(f"\n{'='*50}\n🔧 Processando endpoint: {endpoint_name} [{tipo_str}]")
 
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS {endpoint_name} (
@@ -142,35 +185,68 @@ def run_extraction(data_inicio, data_fim, endpoints_file, prefeituras_file, db_f
             municipio = prefeitura['municipio']
             prefeitura_nome = prefeitura['prefeitura']
             base_url = normalizar_url(prefeitura['url'])
+            
+            if base_url.endswith('/api'):
+                base_url = base_url[:-4]
+
             print(f"\n🏛️ Prefeitura: {prefeitura_nome} ({municipio})")
 
+            anos_processados = set()
+
             for ano, mes in generate_months_range(data_inicio, data_fim):
-                print(f"📅 {mes:02d}/{ano}", end=' ', flush=True)
+                
+                # Se for anual, só processa se ainda não processou este ano
+                if eh_anual:
+                    if ano in anos_processados:
+                        continue
+                    anos_processados.add(ano)
+                    mes_request = 0 
+                    print(f"📅 {ano} (Anual)", end=' ', flush=True)
+                else:
+                    mes_request = mes
+                    print(f"📅 {mes:02d}/{ano}", end=' ', flush=True)
+
                 cursor.execute(f'''
                     SELECT 1 FROM {endpoint_name} 
                     WHERE municipio = ? AND prefeitura = ? AND ano = ? AND mes = ?
                     LIMIT 1
-                ''', (municipio, prefeitura_nome, ano, mes))
+                ''', (municipio, prefeitura_nome, ano, mes_request))
 
                 if cursor.fetchone():
                     print("✅ Já existe no BD", end=' ')
                     continue
 
-                url = f"{base_url}/{endpoint}?ano={ano}&mes={mes:02d}"
+                url = f"{base_url}/api/transparencia.asmx/json_{endpoint}?ano={ano}&mes={mes_request:02d}"
+                
                 try:
-                    response = session.get(url, timeout=30)
+                    response = session.get(url, timeout=45)
                     response.raise_for_status()
+                    
                     if not response.content.strip():
-                        print("🟡 Resposta vazia. Ignorando.", end=' ')
+                        print("🟡 Resposta vazia.", end=' ')
                         continue
-                    dados = response.json()
+                    
+                    dados = None
+                    # Tenta parsear JSON direto
+                    try:
+                        dados = response.json()
+                    except ValueError:
+                        # Se falhar, tenta extrair JSON de dentro do XML/String
+                        dados = extrair_json_de_xml(response.text)
+                        
+                    if dados is None:
+                         # Se ainda assim falhar, loga amostra
+                        content_sample = response.text[:100].replace('\n', ' ')
+                        print(f"🔴 ERRO: JSON inválido. Amostra: {content_sample}...", end=' ')
+                        raise ValueError("Falha ao interpretar resposta (não é JSON nem XML encapsulado)")
+
                     df = pd.DataFrame(dados)
 
                     if not df.empty:
                         df['municipio'] = municipio
                         df['prefeitura'] = prefeitura_nome
                         df['ano'] = ano
-                        df['mes'] = mes
+                        df['mes'] = mes_request
 
                         cursor.execute(f"PRAGMA table_info({endpoint_name})")
                         existing_columns = [col[1] for col in cursor.fetchall()]
@@ -187,9 +263,13 @@ def run_extraction(data_inicio, data_fim, endpoints_file, prefeituras_file, db_f
 
                         df.to_sql(endpoint_name, conn, if_exists='append', index=False)
                         print("✅ Dados salvos", end=' ')
+                    else:
+                        print("⚪ JSON vazio", end=' ')
 
                 except Exception as e:
-                    print(f"🔴 ERRO: {str(e)}", end=' ')
+                    if "JSON" not in str(e):
+                         print(f"🔴 ERRO: {str(e)}", end=' ')
+                    
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     with open(error_log_file, 'a') as f:
                         f.write(f"{timestamp}|{url}|{type(e).__name__}|{str(e)}\n")
@@ -226,18 +306,29 @@ def run_failed_urls(error_log_file, endpoints_file, prefeituras_file, db_file):
         try:
             print(f"🔁 Tentando novamente: {url}", end=' ', flush=True)
             url = normalizar_url(url).replace('//', '/').replace('https:/', 'https://')
+            url = url.replace('/api/api/', '/api/')
+            
             parsed = urlparse(url)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
-            if '?' not in url:
-                print("🟡 URL sem parâmetros. Ignorando.")
-                continue
+            
+            endpoint_name = parsed.path.split('/')[-1].replace('Get', '').replace('json_', '').lower()
+            eh_anual = is_endpoint_anual(endpoint_name)
 
             query_params = parsed.query
             params_dict = dict(param.split('=', 1) for param in query_params.split('&'))
             ano = int(params_dict.get('ano', 0))
             mes = int(params_dict.get('mes', 0))
 
+            # Se for anual e o mês estava errado/ausente, força mes=0 para tentar corrigir
+            if eh_anual and mes != 0:
+                base_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                url = f"{base_path}?ano={ano}&mes=00"
+                mes = 0
+
             prefeitura_match = prefeituras[prefeituras['url'].str.strip().apply(normalizar_url) == base_url]
+            if prefeitura_match.empty:
+                 prefeitura_match = prefeituras[prefeituras['url'].str.strip().apply(lambda x: normalizar_url(x).rstrip('/api')) == base_url]
+
             if prefeitura_match.empty:
                 print("🟡 Prefeitura não encontrada. Ignorando.")
                 continue
@@ -245,15 +336,20 @@ def run_failed_urls(error_log_file, endpoints_file, prefeituras_file, db_file):
             prefeitura = prefeitura_match.iloc[0]
             municipio = prefeitura['municipio']
             prefeitura_nome = prefeitura['prefeitura']
-            endpoint_name = parsed.path.split('/')[-1].replace('Get', '').lower()
 
             response = session.get(url, timeout=60)
             response.raise_for_status()
-            if not response.content.strip():
-                print("🟡 Resposta vazia. Ignorando.")
-                continue
+            
+            dados = None
+            try:
+                dados = response.json()
+            except ValueError:
+                dados = extrair_json_de_xml(response.text)
 
-            dados = response.json()
+            if dados is None:
+                 print("🔴 Falha parsing JSON/XML")
+                 continue
+
             df = pd.DataFrame(dados)
 
             if not df.empty:
@@ -278,6 +374,8 @@ def run_failed_urls(error_log_file, endpoints_file, prefeituras_file, db_file):
                 df.to_sql(endpoint_name, conn, if_exists='append', index=False)
                 success_count += 1
                 print("✅ Sucesso")
+            else:
+                print("⚪ Vazio (Sucesso)")
 
         except Exception as e:
             print(f"🔴 Falhou novamente: {str(e)}")
