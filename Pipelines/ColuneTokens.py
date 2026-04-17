@@ -3,12 +3,12 @@ import os
 import tiktoken
 import pandas as pd
 
-# 1. CONFIGURAÇÃO DE CAMINHOS
+# CONFIGURAÇÃO DE CAMINHOS
 diretorio_script = os.path.dirname(os.path.abspath(__file__))
 caminho_banco = os.path.join(diretorio_script, '..', 'bds', 'convenios.duckdb')
 caminho_banco = os.path.normcase(os.path.normpath(caminho_banco))
 
-# 2. MODELO DE CODIFICAÇÃO 
+# MODELO DE CODIFICAÇÃO 
 encoder = tiktoken.get_encoding("cl100k_base")
 
 def atualizar_tokens_conteudo():
@@ -16,7 +16,7 @@ def atualizar_tokens_conteudo():
     con = duckdb.connect(caminho_banco, read_only=False)
     
     try:
-        # 1. BUSCA DE DADOS
+        # BUSCA DE DADOS
         print("Lendo 'texto_conteudo' do banco...")
         query_selecao = "SELECT rowid, texto_conteudo FROM convenios WHERE qtd_tokens IS NULL"
         df = con.execute(query_selecao).df()
@@ -27,7 +27,7 @@ def atualizar_tokens_conteudo():
 
         print(f"Calculando tokens para {len(df)} linhas...")
 
-        # 2. CÁLCULO DE TOKENS
+        # CÁLCULO DE TOKENS
         def calcular(texto):
             if not texto or str(texto).lower() == 'nan':
                 return 0
@@ -36,7 +36,7 @@ def atualizar_tokens_conteudo():
 
         df['tokens_calculados'] = df['texto_conteudo'].apply(calcular)
 
-        # 3. ATUALIZAÇÃO EM MASSA
+        # ATUALIZAÇÃO EM MASSA
         # Registra o DataFrame como uma tabela temporária no DuckDB
         con.register('dados_novos', df)
         
@@ -48,7 +48,7 @@ def atualizar_tokens_conteudo():
             WHERE convenios.rowid = dados_novos.rowid
         """)
         
-        # 4. VERIFICAÇÃO FINAL
+        # VERIFICAÇÃO FINAL
         total_linhas = len(df)
         soma_tokens = df['tokens_calculados'].sum()
         print(f"Sucesso! {total_linhas} linhas atualizadas.")

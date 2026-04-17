@@ -6,12 +6,12 @@ NOME_PASTA_BDS = "bds"
 NOME_BANCO = "convenios.db"
 NOME_TABELA_DB = "convenios"
 
-# --- Construção do caminho robusto para o banco de dados ---
-# 1. Pega o caminho absoluto do script 
+# --- Construção do caminho para o banco de dados ---
+# Pega o caminho absoluto do script 
 script_path = Path(__file__).resolve()
-# 2. Sobe dois níveis para encontrar a pasta raiz do projeto 
+# Sobe dois níveis para encontrar a pasta raiz do projeto 
 project_root = script_path.parent.parent
-# 3. Constrói o caminho para o banco de dados
+# Constrói o caminho para o banco de dados
 CAMINHO_BANCO_COMPLETO = project_root / NOME_PASTA_BDS / NOME_BANCO
 
 
@@ -100,12 +100,11 @@ def ajustar_banco_de_dados():
         return
 
     print(f"Buscando o banco de dados em: '{CAMINHO_BANCO_COMPLETO}'")
-    # A função sqlite3.connect() aceita o objeto Path diretamente
     conn = sqlite3.connect(CAMINHO_BANCO_COMPLETO)
     cursor = conn.cursor()
     print("✅ Conexão com o banco de dados estabelecida.")
 
-    # --- 1. Adicionar a nova coluna 'nome_categoria' ---
+    # --- Adicionar a nova coluna 'nome_categoria' ---
     try:
         cursor.execute(f"ALTER TABLE {NOME_TABELA_DB} ADD COLUMN nome_categoria TEXT")
         print("  -> Coluna 'nome_categoria' adicionada com sucesso.")
@@ -118,7 +117,7 @@ def ajustar_banco_de_dados():
             conn.close()
             return
             
-    # --- 2. Preencher a nova coluna com base no mapeamento ---
+    # ---  Preencher a nova coluna com base no mapeamento ---
     print("\n🔄 Atualizando as categorias com base no 'id_pagina'...")
     total_atualizado = 0
     for id_pagina, nome_categoria in MAPEAMENTO_IDS.items():
@@ -132,7 +131,7 @@ def ajustar_banco_de_dados():
     conn.commit()
     print(f"  -> ✅ {total_atualizado} registros foram atualizados com a nova categoria.")
 
-    # --- 3. Remover linhas com 'descricao' vazia ou com erro ---
+    # ---  Remover linhas com 'descricao' vazia ou com erro ---
     print("\n🗑️  Procurando por registros com descrição vazia ou com erro para remover...")
     
     # Contar quantos registros serão removidos antes de apagar

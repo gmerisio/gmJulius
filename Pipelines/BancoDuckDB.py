@@ -9,9 +9,7 @@ tabela_origem = "contratos"
 
 con = duckdb.connect(duckdb_file)
 
-# 1. Instala/Carrega a extensão SQLite
-# 2. Conecta o arquivo SQLite ao DuckDB (Attach)
-# 3. Cria a tabela 'dados' copiando da origem
+# Instala/Carrega a extensão SQLite, conecta o arquivo SQLite ao DuckDB (Attach) e cria a tabela 'dados' copiando da origem
 con.execute(f"""
     INSTALL sqlite;
     LOAD sqlite;

@@ -49,7 +49,7 @@ TABELA_DUCKDB_DESTINO = "convenios"
 def extrair_texto_pdf(caminho_pdf):
     texto_total = []
     
-    # 1. TENTATIVA DIRETA
+    # TENTATIVA DIRETA
     try:
         with fitz.open(caminho_pdf) as pdf:
             for pagina in pdf:
@@ -63,7 +63,7 @@ def extrair_texto_pdf(caminho_pdf):
     except Exception as e:
         pass # Falha silenciosa para tentar OCR
 
-    # 2. FALLBACK OCR
+    # FALLBACK OCR
     if TESSERACT_DISPONIVEL:
         try:
             texto_ocr = []
@@ -118,15 +118,15 @@ def salvar_no_duckdb_robusto(conn_duck, df_dados):
             "data_processamento"
         ]
         
-        # 1. Garantir que o DataFrame tenha todas as colunas da lista (preenche com None se faltar)
+        # Garantir que o DataFrame tenha todas as colunas da lista (preenche com None se faltar)
         for col in colunas_alvo:
             if col not in df_dados.columns:
                 df_dados[col] = None
 
-        # 2. Filtrar o DataFrame para ter APENAS essas colunas, na ordem correta
+        # Filtrar o DataFrame para ter APENAS essas colunas, na ordem correta
         df_para_inserir = df_dados[colunas_alvo]
 
-        # 3. Montar a Query Dinâmica
+        # Montar a Query Dinâmica
         colunas_str = ", ".join(colunas_alvo)
         
         # Verifica se tabela existe para criar ou inserir
@@ -156,7 +156,7 @@ def salvar_no_duckdb_robusto(conn_duck, df_dados):
 
 def processar_e_salvar_texto(id_selecionados):
     
-    # 1. Conexões com Bancos de Dados
+    # Conexões com Bancos de Dados
     conn_sqlite = None
     conn_duck = None
     
@@ -196,11 +196,11 @@ def processar_e_salvar_texto(id_selecionados):
             nome_arquivo = os.path.basename(caminho_arquivo)
             arquivos_processados += 1
             
-            # 1. Extrai o Texto
+            #  Extrai o Texto
             status, texto_extraido = extrair_texto_pdf(caminho_arquivo)
 
             if status.startswith("SUCESSO"):
-                # 2. Busca Metadados no SQLite Existente
+                # Busca Metadados no SQLite Existente
                 df_meta = buscar_metadados_sqlite(conn_sqlite, nome_arquivo)
                 
                 if df_meta is not None:
@@ -209,7 +209,7 @@ def processar_e_salvar_texto(id_selecionados):
                     df_meta['status_extracao'] = status
                     df_meta['data_processamento'] = pd.Timestamp.now()
 
-                    # 4. Salva no DuckDB
+                    # Salva no DuckDB
                     try:
                         salvar_no_duckdb_robusto(conn_duck, df_meta)
                         

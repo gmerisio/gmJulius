@@ -75,17 +75,17 @@ def rename_columns(db_path: Path, table: str, rename_map: Dict[str, str]) -> boo
             if new_name in existing_columns and new_name not in rename_map.keys():
                 raise ValueError(f"Coluna '{new_name}' já existe na tabela '{table}'")
         
-        # 4. Prepara o novo schema
+        # Prepara o novo schema
         new_create_sql = schema['create_sql']
         for old_name, new_name in rename_map.items():
             new_create_sql = new_create_sql.replace(f'"{old_name}"', f'"{new_name}"')
             new_create_sql = new_create_sql.replace(f' {old_name} ', f' {new_name} ')
         
-        # 5. Cria nova tabela temporária
+        # Cria nova tabela temporária
         temp_table = f"{table}_temp_{os.getpid()}"  # Nome único usando PID
         cursor.execute(new_create_sql.replace(table, temp_table))
         
-        # 6. Copia os dados
+        # Copia os dados
         columns_select = []
         for col in schema['columns']:
             col_name = col[1]
@@ -101,11 +101,11 @@ def rename_columns(db_path: Path, table: str, rename_map: Dict[str, str]) -> boo
         """
         cursor.execute(insert_sql)
         
-        # 7. Remove a tabela original e renomeia a temporária
+        # Remove a tabela original e renomeia a temporária
         cursor.execute(f"DROP TABLE {table}")
         cursor.execute(f"ALTER TABLE {temp_table} RENAME TO {table}")
         
-        # 8. Recria os índices
+        # Recria os índices
         for index_name, index_sql in schema['indexes']:
             new_index_sql = index_sql
             for old_name, new_name in rename_map.items():
