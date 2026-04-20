@@ -19,3 +19,8 @@ Os arquivos que não aparecerem no GitHub, foram bloqueados pelo .env.
 # Para o futuro
 
 No momento estou focando em pesquisar e implementar melhorias na resposta do chatbot, pois ele está respondendo as perguntas de forma insatisfatória e acredito ser isso que irei focar até que o chatbot estaja respondendo de uma forma coerente para ser implementado como uma ferramenta real. Quando os resultados estiverem satisfatórios, irei concentrar meus esforços para generalizar para outras prefeituras do estados que utilizam a empresa portaltp no portal da transparência, e depois para as demais empresas, para que finalmente possa ser utilizado por servidores e ser uma ferramenta útil e atualizada com os dados públicos.
+
+- Limpeza na tabela que foi feito OCR.
+- Melhorar os comentários inseridos nas tabelas
+- Fazer o chatbot responder de forma mais clara e eficiente
+- Alterar a prefeitura???
