@@ -1,7 +1,0 @@
-requests
-pandas
-numpy
-json
-datetime
-os
-traceback2

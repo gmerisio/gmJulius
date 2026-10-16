@@ -258,7 +258,8 @@ def criar_banco_dados(caminho_banco, nome_tabela):
         arquivo_salvo_em TEXT,
         url_documento TEXT,
         data_extracao TEXT,
-        id_pagina INTEGER
+        id_pagina INTEGER,
+        prefeitura TEXT
     )
     """)
     conn.commit()
@@ -276,12 +277,15 @@ def processar_lista_ids(lista_ids, base_url, pasta_downloads, caminho_banco, nom
         'total_documentos_com_erro': 0
     }
     
+    nome_prefeitura = base_url.split('//')[1].split('-')[0]
+
     conn = sqlite3.connect(caminho_banco)
     cursor = conn.cursor()
     try:
-        cursor.execute(f"SELECT DISTINCT id_pagina FROM {nome_tabela}")
+        cursor.execute(f"SELECT DISTINCT id_pagina FROM {nome_tabela} WHERE prefeitura = '{nome_prefeitura}'")
         ids_processados = set([row[0] for row in cursor.fetchall()])
-    except:
+    except Exception as e:
+        print(f"Aviso na verificação de IDs: {e}")
         ids_processados = set()
     conn.close()
     
@@ -293,7 +297,7 @@ def processar_lista_ids(lista_ids, base_url, pasta_downloads, caminho_banco, nom
             estatisticas_totais['ids_processados'] += 1
             continue
         
-        url_pagina = f"https://saogabrieldapalha-es.portaltp.com.br/consultas/documentos.aspx?id={id_pagina}"
+        url_pagina = f"https://Viana-es.portaltp.com.br/consultas/documentos.aspx?id={id_pagina}"
         
         try:
             dados, baixados, pulados, erros = extrair_e_baixar_documentos_com_selenium(
@@ -303,6 +307,9 @@ def processar_lista_ids(lista_ids, base_url, pasta_downloads, caminho_banco, nom
             if dados:
                 print(f"💾 Salvando {len(dados)} registros no banco...")
                 df = pd.DataFrame(dados)
+                
+                df['prefeitura'] = nome_prefeitura
+                
                 conn = sqlite3.connect(caminho_banco)
                 df.to_sql(nome_tabela, conn, if_exists="append", index=False)
                 conn.close()
@@ -323,13 +330,27 @@ def processar_lista_ids(lista_ids, base_url, pasta_downloads, caminho_banco, nom
     return estatisticas_totais
 
 def main():
-    BASE_URL = "https://saogabrieldapalha-es.portaltp.com.br/"
-    LISTA_IDS = [8, 136, 143, 156, 132, 160, 222, 9, 41, 1012, 77, 55, 219, 34, 371, 631, 153, 76, 455, 311, 33, 106, 521, 248, 481, 1355, 104, 455, 458, 881, 1, 2, 3, 4, 5, 7, 6, 60, 590, 64, 39, 555, 1255, 99, 57, 56, 63, 58, 59, 36, 61, 1074, 1241, 230, 2019, 557, 1291, 558, 530, 514, 515, 528, 800, 914, 547, 1346, 1390, 1342]
+    BASE_URL = "https://Viana-es.portaltp.com.br/"
+    LISTA_IDS = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 33, 34, 41, 55, 57, 59, 60, 61, 76, 77, 
+    81, 99, 104, 123, 132, 136, 138, 147, 155, 156, 160, 162, 180, 222, 
+    229, 239, 371, 379, 399, 454, 458, 475, 478, 492, 493, 512, 536, 539, 
+    548, 549, 557, 558, 561, 576, 605, 606, 612, 613, 656, 660, 715, 725, 
+    791, 800, 824, 837, 844, 914, 944, 966, 980, 986, 989, 990, 991, 993, 
+    994, 995, 998, 1004, 1009, 1012, 1029, 1037, 1047, 1050, 1099, 1101, 
+    1117, 1139, 1181, 1221, 1226, 1227, 1252, 1257, 1258, 1260, 1261, 1262, 
+    1263, 1269, 1272, 1314, 1342, 1344, 1391, 1393, 1398, 1399, 1403, 1415, 
+    1416, 1440, 1445, 1456, 1462, 1468, 1543, 1583, 1584, 1614, 1617, 1866, 
+    1870, 1879, 1945, 1951, 1954, 1994, 1995, 2008, 2025, 2042, 2050, 2150, 
+    2152, 2171, 2182, 2195, 2326, 2328, 2394, 2425, 3183, 3282
+]
     PASTA_DOWNLOADS = "documentos_convenios" 
     PASTA_BDS = "bds"  
-    NOME_BANCO = "convenios.db"  
+    NOME_BANCO = "bdTCC.db"  
     NOME_TABELA_DB = "convenios"
     CAMINHO_BANCO_COMPLETO = os.path.join(PASTA_BDS, NOME_BANCO)
+
+    nome_prefeitura = BASE_URL.split('//')[1].split('-')[0]
     
     estatisticas = processar_lista_ids(LISTA_IDS, BASE_URL, PASTA_DOWNLOADS, CAMINHO_BANCO_COMPLETO, NOME_TABELA_DB)
     

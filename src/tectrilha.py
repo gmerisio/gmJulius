@@ -27,6 +27,37 @@ def get_retry_session():
     
     return session
 
+def obter_anos_disponiveis(session, base_url, endpoint_name, ano_inicio_padrao, ano_fim_padrao):
+    # Trata sub-rotas como 'pessoal/mensal' pegando apenas a raiz 'pessoal'
+    endpoint_raiz = endpoint_name.split('/')[0]
+    url_anos = f"{base_url}/api/{endpoint_raiz}/anos"
+    
+    try:
+        res = session.get(url_anos, timeout=10)
+        if res.status_code == 200 and res.content.strip():
+            dados = res.json()
+            anos_encontrados = []
+            
+            if isinstance(dados, list):
+                for item in dados:
+                    if isinstance(item, dict):
+                        # Pega o primeiro valor numérico de 4 dígitos encontrado no dict
+                        for v in item.values():
+                            if isinstance(v, int) and 1990 <= v <= 2030:
+                                anos_encontrados.append(v)
+                            elif isinstance(v, str) and v.isdigit() and 1990 <= int(v) <= 2030:
+                                anos_encontrados.append(int(v))
+                    elif isinstance(item, (int, str)) and str(item).isdigit():
+                        anos_encontrados.append(int(item))
+            
+            if anos_encontrados:
+                return sorted(list(set(anos_encontrados)))
+    except Exception:
+        pass
+    
+    # Se a rota /anos não existir para este assunto, usa o intervalo definido pelo usuário
+    return list(range(ano_inicio_padrao, ano_fim_padrao + 1))
+
 
 def main():
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -114,7 +145,7 @@ def get_periodo_usuario():
             print("🔴 Formato inválido. Use AAAA (ex: 2024). Tente novamente.")
 
 def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file, error_log_file):
-    assuntos = load_assuntos(assuntos_file)  # Carrega os assuntos e parâmetros do CSV
+    assuntos = load_assuntos(assuntos_file)
     prefeituras = load_prefeituras(prefeituras_file)
     prefeituras_tectrilha = prefeituras[prefeituras['empresa'] == 'tectrilha']
 
@@ -128,12 +159,13 @@ def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file
 
     for _, assunto in assuntos.iterrows():
         endpoint_name = assunto['assunto']
+        table_name = endpoint_name.replace('/', '_').replace('-', '_')
         parametros = assunto['parametros'].strip() if pd.notna(assunto['parametros']) else ""
         
         print(f"\n{'='*50}\n🔧 Processando endpoint: {endpoint_name}")
 
         cursor.execute(f'''
-            CREATE TABLE IF NOT EXISTS {endpoint_name} (
+            CREATE TABLE IF NOT EXISTS {table_name} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 municipio TEXT,
                 prefeitura TEXT,
@@ -150,10 +182,18 @@ def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file
             base_url = normalizar_url(prefeitura['url']).rstrip('/api')
             print(f"\n🏛️ Prefeitura: {prefeitura_nome} ({municipio}) - UG: {unidade_gestora}")
 
-            for ano in range(ano_inicio, ano_fim + 1):
+            # Busca dinâmica dos anos disponíveis via API
+            anos_disponiveis = obter_anos_disponiveis(session, base_url, endpoint_name, ano_inicio, ano_fim)
+            anos_para_processar = [a for a in anos_disponiveis if ano_inicio <= a <= ano_fim]
+
+            if not anos_para_processar:
+                print(" ⚠️ Nenhum ano com dados disponível no período selecionado.")
+                continue
+
+            for ano in anos_para_processar:
                 print(f"📅 {ano}", end=' ', flush=True)
                 cursor.execute(f'''
-                    SELECT 1 FROM {endpoint_name} 
+                    SELECT 1 FROM {table_name} 
                     WHERE municipio = ? AND prefeitura = ? AND unidadegestora = ? AND ano = ?
                     LIMIT 1
                 ''', (municipio, prefeitura_nome, unidade_gestora, ano))
@@ -162,14 +202,12 @@ def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file
                     print("✅ Já existe no BD", end=' ')
                     continue
 
-                # Substitui os placeholders nos parâmetros
                 url_params = parametros.format(
                     unidadeGestoraId=unidade_gestora,
                     exercicio=ano,
                     periodo=""
                 ).strip()
 
-                # Remove espaços em branco e adiciona '?' se houver parâmetros
                 if url_params:
                     if not url_params.startswith('?'):
                         url_params = '?' + url_params
@@ -186,16 +224,14 @@ def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file
                     df = pd.DataFrame(dados)
 
                     if not df.empty:
-                        # Remove colunas que já existem para evitar conflito
                         df = df.drop(columns=['municipio', 'prefeitura', 'unidadegestora', 'ano'], errors='ignore')
 
-                        # Adiciona colunas fixas manualmente
                         df['municipio'] = municipio
                         df['prefeitura'] = prefeitura_nome
                         df['unidadegestora'] = unidade_gestora
                         df['ano'] = ano
 
-                        cursor.execute(f"PRAGMA table_info({endpoint_name})")
+                        cursor.execute(f"PRAGMA table_info({table_name})")
                         existing_columns = [col[1] for col in cursor.fetchall()]
 
                         for column in df.columns:
@@ -205,10 +241,10 @@ def run_extraction(ano_inicio, ano_fim, assuntos_file, prefeituras_file, db_file
                                     col_type = 'REAL'
                                 elif pd.api.types.is_integer_dtype(df[column]):
                                     col_type = 'INTEGER'
-                                cursor.execute(f"ALTER TABLE {endpoint_name} ADD COLUMN {column} {col_type}")
+                                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column} {col_type}")
                                 conn.commit()
 
-                        df.to_sql(endpoint_name, conn, if_exists='append', index=False)
+                        df.to_sql(table_name, conn, if_exists='append', index=False)
                         print("✅ Dados salvos", end=' ')
 
                 except Exception as e:

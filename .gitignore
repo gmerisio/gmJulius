@@ -8,3 +8,4 @@ output/
 *.parquet
 *.csv
 *.ipynb
+bds/TCCb.zip

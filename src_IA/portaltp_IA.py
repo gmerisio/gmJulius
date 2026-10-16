@@ -69,7 +69,7 @@ def main():
 
     endpoints_file = os.path.join(data_dir, 'endpoints_exclusivo.txt')
     prefeituras_file = os.path.join(data_dir, 'prefeiturasExclusivo.csv')
-    db_file = os.path.join(bds_dir, 'ContratosSGDP.db')
+    db_file = os.path.join(bds_dir, 'bdTCC.db')
     error_log_file = os.path.join(logs_dir, 'portaltp_errors.log')
     execution_log_file = os.path.join(logs_dir, 'portaltp_execution.log')
     last_run_file = os.path.join(logs_dir, 'portaltp_last_run.txt')
