@@ -1,0 +1,6 @@
+# Dependencias essenciais para execucao dos modelos de embeddings
+duckdb>=1.0.0
+pandas>=2.0.0
+sentence-transformers>=3.0.0
+torch>=2.0.0
+tqdm>=4.66.0
